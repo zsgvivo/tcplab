@@ -7,6 +7,7 @@ use std::os::unix::net::UnixDatagram;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use bson::spec::BinarySubtype;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 
@@ -34,10 +35,10 @@ lazy_static! {
         loop {
             if let Err(e) = sock.connect("/tmp/network-exp4-driver.socket") {
                 if e.raw_os_error() == Some(1) { // Operation not permitted
-                    println!("等待服务端UnixSocket资源刷新(约500ms)...");
+                    println!("等待服务端UnixSocket资源释放(约500ms)...(若持续出现此信息，请检查自己是否开着另一个SDK进程)");
                     std::thread::sleep(Duration::from_millis(500));
                     continue;
-                }
+                } else { Err::<(), std::io::Error>(e).unwrap(); }
             }
             break;
         }
@@ -46,21 +47,24 @@ lazy_static! {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct Event {
+struct Event<'a> {
     conn: ConnectionIdentifier,
-    bytes: Vec<u8>,
+    bytes: &'a [u8],
     flags: u32,
 }
 
 pub(crate) fn sdk_event(conn: &ConnectionIdentifier, bytes: &[u8], flags: u32) {
-    let event = Event { conn: conn.clone(), bytes: bytes.to_vec(), flags };
+    let event = Event { conn: conn.clone(), bytes: bytes, flags };
     if let Err(e) = unix_socket_send(event) {
         eprintln!("unix_socket_send FAILED: {e}")
     }
 }
 
 fn unix_socket_send(event: Event) -> Result<()> {
-    let data = bson::to_vec(&event)?;
+    // 不能直接对event使用to_vec，否则字符串数组会被序列化成sequence<i32>。必须手动声明其为Binary的
+    let mut bson_obj = bson::to_document(&event)?;
+    bson_obj.insert("bytes", bson::Binary{ subtype: BinarySubtype::Generic, bytes: Vec::from(event.bytes) });
+    let data = bson::to_vec(&bson_obj)?;
     UNIX_SOCK.send(&data[..])?;
     Ok(())
 }
@@ -71,7 +75,7 @@ fn unix_socket_recv(buf: &mut [u8]) -> Result<()> {
     if size >= buf.len() { return Err(anyhow!("WARNING: 收到了超过接收buffer大小({})的unix domain socket报文！该报文并未被完整接收！", buf.len())); }
     let event = bson::from_slice::<Event>(&buf[0..size])?;
     if event.flags == 0x0 {
-        outgoing::app_send(&event.conn, &event.bytes[..]);
+        outgoing::app_send(&event.conn, event.bytes);
     } else if event.flags == 0x1 {
         outgoing::app_fin(&event.conn);
     } else if event.flags == 0x2 {
@@ -79,7 +83,7 @@ fn unix_socket_recv(buf: &mut [u8]) -> Result<()> {
     } else if event.flags == 0x4 {
         outgoing::app_rst(&event.conn);
     } else if event.flags == 0x40 {
-        outgoing::tcp_rx(&event.conn, &event.bytes[..])
+        outgoing::tcp_rx(&event.conn, event.bytes)
     }
     Ok(())
 }

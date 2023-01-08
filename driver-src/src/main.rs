@@ -14,6 +14,7 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use bson::spec::BinarySubtype;
 use clap::{Parser, Subcommand};
 use lazy_static::lazy_static;
 use pnet_packet::Packet;
@@ -42,9 +43,9 @@ pub struct ConnectionIdentifier {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct Event {
+struct Event<'a> {
     conn: ConnectionIdentifier,
-    bytes: Vec<u8>,
+    bytes: &'a [u8],
     flags: u32,
 }
 
@@ -115,7 +116,7 @@ async fn process_unix_sock_inner(buf: &mut [u8]) -> Result<()> {
     let size = UNIX_SOCK.recv(buf).await?;
     if size >= buf.len() { return Err(anyhow!("WARNING: 收到了超过接收buffer大小({})的unix domain socket报文！该报文并未被完整接收！", buf.len())); }
     let event = bson::from_slice::<Event>(&buf[0..size])?;
-    if let Err(e) = sdk_event(&event.conn, &event.bytes[..], event.flags).await { eprintln!("sdk_event FAILED: {e}") }
+    if let Err(e) = sdk_event(&event.conn, event.bytes, event.flags).await { eprintln!("sdk_event FAILED: {e}") }
     Ok(())
 }
 
@@ -194,8 +195,10 @@ async fn sdk_event(conn: &ConnectionIdentifier, bytes: &[u8], flags: u32) -> Res
     Ok(())
 }
 
-async fn driver_event_inner(event: Event) -> Result<()> {
-    let data = bson::to_vec(&event)?;
+async fn driver_event_inner(event: Event<'_>) -> Result<()> {
+    let mut bson_obj = bson::to_document(&event)?;
+    bson_obj.insert("bytes", bson::Binary{ subtype: BinarySubtype::Generic, bytes: Vec::from(event.bytes) });
+    let data = bson::to_vec(&bson_obj)?;
     UNIX_SOCK.send(&data[..]).await?;
     Ok(())
 }
@@ -203,7 +206,7 @@ async fn driver_event_inner(event: Event) -> Result<()> {
 /// flags: 0x4 rst(并release资源), 0x2 connected, 0x1 fin。
 /// 0x0时是要send数据。0x40时是收到了RAW的TCP报文。
 async fn driver_event(conn: &ConnectionIdentifier, bytes: &[u8], flags: u32) {
-    let event = Event { conn: conn.clone(), bytes: bytes.to_vec(), flags };
+    let event = Event { conn: conn.clone(), bytes: bytes, flags };
     if let Err(e) = driver_event_inner(event).await {
         eprintln!("driver_event FAILED: {e}")
     }
