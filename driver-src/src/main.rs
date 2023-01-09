@@ -3,7 +3,7 @@
 /// 你不可以改动driver的源代码。助教在评判你的作业的时候，也会使用自己编译的driver，不会使用你提交的driver。
 /// 但是，你可以自由地阅读和分析driver的源代码。如果你认为有有问题的地方，请随时找助教反应。
 use std::collections::{HashMap, HashSet};
-use std::ffi::c_void;
+use std::ffi::{c_void, CString};
 use std::fs::remove_file;
 use std::io::Error;
 use std::mem::size_of;
@@ -69,7 +69,10 @@ lazy_static! {
     static ref RAW_SOCK: UdpSocket = create_raw_sock().unwrap();
     static ref UNIX_SOCK: UnixDatagram = (|| {
         remove_file("/tmp/network-exp4-driver.socket").ok();
-        UnixDatagram::bind("/tmp/network-exp4-driver.socket").unwrap()
+        let sock = UnixDatagram::bind("/tmp/network-exp4-driver.socket").unwrap();
+        let cstring = CString::new("/tmp/network-exp4-driver.socket").unwrap();
+        unsafe { libc_wrap(libc::chmod(cstring.as_ptr(), 0x777)).unwrap(); }
+        sock
     })();
     static ref KEEP_ALIVE_SWITCH: Mutex<bool> = Mutex::new(false);
 }
