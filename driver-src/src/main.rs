@@ -197,7 +197,7 @@ async fn sdk_event(conn: &ConnectionIdentifier, bytes: &[u8], flags: u32) -> Res
 
 async fn driver_event_inner(event: Event<'_>) -> Result<()> {
     let mut bson_obj = bson::to_document(&event)?;
-    bson_obj.insert("bytes", bson::Binary{ subtype: BinarySubtype::Generic, bytes: Vec::from(event.bytes) });
+    bson_obj.insert("bytes", bson::Binary { subtype: BinarySubtype::Generic, bytes: Vec::from(event.bytes) });
     let data = bson::to_vec(&bson_obj)?;
     UNIX_SOCK.send(&data[..]).await?;
     Ok(())
@@ -315,10 +315,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// 只有从127.84.x.x上发出的TCP连接才会被捕获和调用自定义TCP协议。不带任何command时，默认即为此模式。
-    Partial,
-    /// 从本机发出的所有TCP连接都会被捕获和调用自定义TCP协议。
+    /// 从本机发出的所有TCP连接都会被捕获和调用自定义TCP协议。不带任何command时，默认即为此模式。
     All,
+    /// 只有从127.84.x.x上发出的TCP连接才会被捕获和调用自定义TCP协议。
+    Partial,
     /// 强制清除连接捕获配置后直接退出。正常情况下，程序退出时会自动清除连接捕获配置，但不排除在少数情况下程序异常退出、连接捕获配置没有被清除，造成无法上网等问题。此种情况下，请使用此命令手动清除一次。
     Clear,
     /// 打印当前的连接捕获配置信息。（主要供driver开发者调试用）
@@ -346,7 +346,7 @@ async fn main() -> Result<()> {
     tokio::spawn(process_unix_sock());
     tokio::spawn(unix_sock_keepalive());
     // 在确保listener监听成功后，再配置nftables规则
-    let nftguard = NftGuard::new(if let Some(Commands::All) = command { true } else { false });
+    let nftguard = NftGuard::new(if let Some(Commands::Partial) = command { false } else { true });
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         drop(nftguard);

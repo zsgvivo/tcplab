@@ -1,7 +1,7 @@
 /**
  * 这是SDK内置的代码，本文件中是提供给你、供你在outgoing自由调用的数据结构和函数。
  * 你需要仔细阅读此文件，了解ConnectionIdentifier这一结构体和五个提供给你的函数。重点阅读函数上方的注释。
- * 此文件通常不用改动。但如果你有确切的理由，也可以自行改动，但请务必确保你清楚自己在做什么！
+ * 你可能不用改动此文件，但如果你确实需要的话（比如想加几个方法，或重载运算符之类），当然也可以改动。只要你清楚自己在做什么！
  * 助教评阅时，会使用你上传的版本。
  */
 #ifndef NETWORK_EXP4_SDK_API_H
@@ -26,6 +26,8 @@ struct ConnectionIdentifier {
     IpAndPort src;
     IpAndPort dst;
 };
+
+bool operator==(ConnectionIdentifier &a, ConnectionIdentifier& b);
 
 // 随便实现的，方便你调试
 std::ostream &operator<<(std::ostream &out, ConnectionIdentifier &conn);
