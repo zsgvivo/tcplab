@@ -33,8 +33,8 @@ pub struct Tcp {
     pub window: u16,
     pub checksum: u16,
     pub urgent_ptr: u16,
-    pub options: Vec<TcpOption, Global>,
-    pub payload: Vec<u8, Global>,
+    // pub options: Vec<TcpOption, Global>,
+    // pub payload: Vec<u8, Global>,
 }
 
 /// 当有应用想要发起一个新的连接时，会调用此函数。想要连接的对象在conn里提供了。
@@ -43,7 +43,9 @@ pub struct Tcp {
 /// param: conn: 连接对象
 pub fn app_connect(conn: &ConnectionIdentifier) {
     // TODO 请实现此函数
-    syn_pkt = 
+    tcpsyn = Tcp{
+        sourceL: conn.src.
+    }
     
     app_connected(conn);
     println!("app_connect, {:?}", conn);
