@@ -3,15 +3,39 @@
 /// 在开始写代码之前，请先仔细阅读此文件和api文件。这个文件里的五个函数是等你去完成的，而api里的函数是供你调用的。
 /// 提示：TCP是有状态的协议，因此你大概率，会需要一个什么样的数据结构来记录和维护所有连接的状态
 use crate::api::{ConnectionIdentifier, app_connected};
-
+// use pnet::packet::tcp;
 enum State{
-    SynRcvd,
-    Estab,
-    FinWait1,
-    FinWait2,
-    TimeWait,
+    SYNSENT,
+    ESTABLISHED,
+    FINWAIT1,
+    FINWAIT2,
+    TIMEWAIT,
 }
 
+pub struct Connection{
+    state: State,
+    conn: ConnectionIdentifier,
+    seq: u32,
+    ack: u32,
+    // send_window: u16,
+    // recv_window: u16,
+
+}
+
+pub struct Tcp {
+    pub source: u16,
+    pub destination: u16,
+    pub sequence: u32,
+    pub acknowledgement: u32,
+    pub data_offset: u8,
+    pub reserved: u8,
+    pub flags: u16,
+    pub window: u16,
+    pub checksum: u16,
+    pub urgent_ptr: u16,
+    pub options: Vec<TcpOption, Global>,
+    pub payload: Vec<u8, Global>,
+}
 
 /// 当有应用想要发起一个新的连接时，会调用此函数。想要连接的对象在conn里提供了。
 /// 你应该向想要连接的对象发送SYN报文，执行三次握手的逻辑。
@@ -19,6 +43,7 @@ enum State{
 /// param: conn: 连接对象
 pub fn app_connect(conn: &ConnectionIdentifier) {
     // TODO 请实现此函数
+    syn_pkt = 
     
     app_connected(conn);
     println!("app_connect, {:?}", conn);
@@ -52,5 +77,6 @@ pub fn app_rst(conn: &ConnectionIdentifier) {
 ///        bytes: TCP报文内容，是字节数组。（含TCP报头，不含IP报头）
 pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // TODO 请实现此函数
+
     println!("tcp_rx, {:?}, {:?}", conn, std::str::from_utf8(bytes));
 }
