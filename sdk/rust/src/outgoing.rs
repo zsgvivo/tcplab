@@ -46,7 +46,7 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
     syn.write(&mut tcp_header_buf).unwrap();
     tcp_tx(conn, &buf[..syn.header_len() as usize]);
     println!("tcp_header_buf: {:?}", &buf[..syn.header_len() as usize]);
-    println!("tcp header:{:?}", syn);
+    println!("tcp header:{:?}\n", syn);
 
     // 更新 TCP 连接状态
     let mut tcpstate = TCPSTATE.lock().unwrap();
@@ -140,24 +140,16 @@ pub fn tick() {
 pub fn set_checksum(tcp_header: &mut TcpHeader, conn: &ConnectionIdentifier, tcp_payload:&[u8]){
     let src_ipaddr:Ipv4Addr = conn.src.ip.parse().unwrap();
     let dst_ipaddr:Ipv4Addr = conn.dst.ip.parse().unwrap();
-    // 构造 ipv4 报文以计算 tcp checksum
-    let mut ip_header = Ipv4Header::new(
-        tcp_header.header_len() + tcp_payload.len() as u16,
-        64,
-        ip_number::TCP,
-        src_ipaddr.octets(),
-        dst_ipaddr.octets(),
-    );
-    println!("ip header: {:?}", ip_header);
 
-    // 将 tcp header 和 tcp payload 转化为 ipv4 payload, 这里 tcp payload 要进行 byteorder 转换吗?
-    // checksum 是错的, 是 byteorder 的问题吗?
+    // 将 tcp header 和 tcp payload 转化为 ipv4 payload 以计算 checksum
     let mut buf = [0u8; 1500];
     let buf_len = buf.len();
     let mut unwritten = &mut buf[..];
     tcp_header.write(&mut unwritten).unwrap();
     let tcp_header_ends_at = buf_len - unwritten.len();
     buf[tcp_header_ends_at..tcp_header_ends_at + tcp_payload.len()].copy_from_slice(tcp_payload);
-    tcp_header.checksum = tcp_header.calc_checksum_ipv4(&ip_header, &buf[..tcp_header_ends_at + tcp_payload.len()]).expect("failed to compute checksum");
+    // tcp_header.checksum = tcp_header.calc_checksum_ipv4_raw(src_ipaddr.octets(), dst_ipaddr.octets(), &buf[..tcp_header_ends_at + tcp_payload.len()]).expect("failed to compute checksum");
+    let tcp_packet  = tcp::TcpPacket::new(&buf[..tcp_header_ends_at + tcp_payload.len()]).unwrap();
+    tcp_header.checksum = tcp::ipv4_checksum(&tcp_packet, &src_ipaddr, &dst_ipaddr);
     println!("ip payload{:?}", &buf[..tcp_header_ends_at + tcp_payload.len()]);
 }
