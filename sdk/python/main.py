@@ -26,7 +26,9 @@ def unix_socket_send(event: dict):
 def unix_socket_recv():
     max_size = 500000
     data = unix_sock.recv(max_size)
-    if len(data) == 1: return  # 是保活报文
+    if len(data) == 1:  # 是保活报文
+        outgoing.tick()
+        return
     if len(data) >= max_size:
         raise AssertionError(
             f"WARNING: 收到了超过接收buffer大小({max_size})的unix domain socket报文！该报文并未被完整接收！")

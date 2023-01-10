@@ -300,7 +300,7 @@ async fn process_listener(listener: TcpListener, flags: u8) {
 async fn unix_sock_keepalive() {
     let data = [0u8];
     loop {
-        sleep(Duration::from_millis(500)).await;
+        sleep(Duration::from_millis(100)).await;
         if *KEEP_ALIVE_SWITCH.lock().await == true {
             if let Err(_) = UNIX_SOCK.send(&data).await { // 发送一字节的数据以保活
                 *KEEP_ALIVE_SWITCH.lock().await = false;

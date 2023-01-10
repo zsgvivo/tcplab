@@ -59,7 +59,10 @@ bool unix_socket_recv(uint8_t buf[], size_t len) {
         perror("unix_sock read");
         return false;
     }
-    if (size == 1) return true; // 是保活报文
+    if (size == 1) { // 是保活报文
+        tick();
+        return true;
+    }
     if (size >= len) {
         std::cerr << "WARNING: 收到了超过接收buffer大小({})的unix domain socket报文！该报文并未被完整接收！" << std::endl;
         return false;

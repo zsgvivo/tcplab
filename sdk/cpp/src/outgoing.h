@@ -19,4 +19,6 @@ void app_rst(ConnectionIdentifier &conn);
 
 void tcp_rx(ConnectionIdentifier &conn, std::vector<uint8_t> &bytes);
 
+void tick();
+
 #endif //NETWORK_EXP4_SDK_OUTGOING_H

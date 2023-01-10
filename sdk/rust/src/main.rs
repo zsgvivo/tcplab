@@ -71,7 +71,10 @@ fn unix_socket_send(event: Event) -> Result<()> {
 
 fn unix_socket_recv(buf: &mut [u8]) -> Result<()> {
     let size = UNIX_SOCK.recv(buf)?;
-    if size == 1 { return Ok(()); } // 是保活报文
+    if size == 1 { // 是保活报文
+        outgoing::tick();
+        return Ok(());
+    }
     if size >= buf.len() { return Err(anyhow!("WARNING: 收到了超过接收buffer大小({})的unix domain socket报文！该报文并未被完整接收！", buf.len())); }
     let event = bson::from_slice::<Event>(&buf[0..size])?;
     if event.flags == 0x0 {

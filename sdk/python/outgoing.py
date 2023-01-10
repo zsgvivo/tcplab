@@ -60,3 +60,12 @@ def tcp_rx(conn: ConnectionIdentifier, data: bytes):
     """
     # TODO 请实现此函数
     print("tcp_rx", conn, data.decode(errors='replace'))
+
+
+def tick():
+    """
+    这个函数会每至少100ms调用一次，以保证控制权可以定期的回到你实现的函数中，而不是一直阻塞在main文件里面。
+    它可以被用来在不开启多线程的情况下实现超时重传等功能，详见主仓库的README.md
+    """
+    # TODO 可实现此函数，也可不实现
+    pass
