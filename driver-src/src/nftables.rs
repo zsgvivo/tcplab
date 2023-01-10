@@ -17,7 +17,7 @@ impl NftGuard {
             get_command("ip route add 0.0.0.0/0 dev lo table 84").output().unwrap();
             println!("已配置ip route规则")
         }
-        let nft_conf = include_str!("../nftables.conf");
+        let nft_conf = include_str!("nftables.conf");
         // patch nft的规则
         let (name, match_cidr) = if all { ("all", "0.0.0.0/0") } else { ("partial", "127.84.0.0/16") };
         let patched_conf = nft_conf.replace("$MATCH_CIDR", match_cidr);

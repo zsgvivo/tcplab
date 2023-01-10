@@ -130,3 +130,9 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     }
     println!("tcp_rx, {:?}, {:?}", conn, std::str::from_utf8(bytes));
 }
+
+/// 这个函数会每至少100ms调用一次，以保证控制权可以定期的回到你实现的函数中，而不是一直阻塞在main文件里面。
+/// 它可以被用来在不开启多线程的情况下实现超时重传等功能，详见主仓库的README.md
+pub fn tick() {
+    // TODO 可实现此函数，也可不实现
+}

@@ -1,11 +1,12 @@
 """
-这是SDK内置的代码，本文件中是提供给你、供函数。
+这是SDK内置的代码，本文件中是提供给你、供你在outgoing自由调用的函数。
 你需要仔细阅读此文件，了解五个提供给你的函数。重点阅读函数上方的注释。还要阅读api_type.py文件，了解ConnectionIdentifier数据类。
 你可能不用改动此文件，但如果你确实需要的话（比如想加几个方法，或重载运算符之类），当然也可以改动。只要你清楚自己在做什么！
 助教评阅时，会使用你上传的版本。
 """
 from api_type import ConnectionIdentifier
-from main import sdk_event
+from __main__ import sdk_event
+
 
 # ConnectionIdentifier的定义在api_type.py中
 def app_connected(conn: ConnectionIdentifier):

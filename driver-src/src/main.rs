@@ -17,6 +17,7 @@ use anyhow::Result;
 use bson::spec::BinarySubtype;
 use clap::{Parser, Subcommand};
 use lazy_static::lazy_static;
+use pnet_packet::ip::IpNextHeaderProtocols;
 use pnet_packet::Packet;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,7 @@ async fn process_raw_sock_inner(buf: &mut [u8]) -> Result<()> {
     let (size, addr) = RAW_SOCK.recv_from(buf).await?;
     if size >= buf.len() { return Err(anyhow!("WARNING: 收到了超过接收buffer大小({})的IP raw报文！该报文并未被完整接收！", buf.len())); }
     let ip_packet = pnet_packet::ipv4::Ipv4Packet::new(buf).ok_or(anyhow!("Received packet cannot be parsed as IPV4"))?;
+    if ip_packet.get_next_level_protocol() != IpNextHeaderProtocols::Tcp { return Ok(()); } // 不处理TCP以外的报文
     let tcp_packet: &[u8] = ip_packet.payload();
     let conn_res;
     {
@@ -272,8 +274,12 @@ async fn process_listener_inner(listener: &TcpListener, flags: u8) -> Result<()>
     let (socket, _) = listener.accept().await?;
     // 构造ConnectionIdentifier对象，然后把socket所有权转移到APP_SOCKS里面去
     let dst = IpAndPort { ip: socket.local_addr()?.ip().to_string(), port: socket.local_addr()?.port() };
-    let conn = ConnectionIdentifier { src: IpAndPort { ip: socket.peer_addr()?.ip().to_string(), port: get_available_pool_port(&dst).await? }, dst };
-    println!("捕获到新连接！从 本机:{} 到 {} 。(被捕获连接原始来源 {} )", conn.src.port, socket.local_addr()?, socket.peer_addr()?);
+    // 借鉴 https://stackoverflow.com/a/29500867 ：通过创建并connect一个UDP socket来确定所应使用的src IP
+    let test_source_sock = UdpSocket::bind("0.0.0.0:0").await?;
+    test_source_sock.connect(socket.local_addr()?).await?;
+    let src = IpAndPort { ip: test_source_sock.local_addr()?.ip().to_string(), port: get_available_pool_port(&dst).await? };
+    let conn = ConnectionIdentifier { src, dst };
+    println!("捕获到新连接！从 {}:{} 到 {} 。(被捕获连接原始来源 {} )", conn.src.ip, conn.src.port, socket.local_addr()?, socket.peer_addr()?);
     let fd = socket.as_raw_fd();
     let (reader, writer) = socket.into_split();
     {
@@ -300,7 +306,7 @@ async fn process_listener(listener: TcpListener, flags: u8) {
 async fn unix_sock_keepalive() {
     let data = [0u8];
     loop {
-        sleep(Duration::from_millis(500)).await;
+        sleep(Duration::from_millis(100)).await;
         if *KEEP_ALIVE_SWITCH.lock().await == true {
             if let Err(_) = UNIX_SOCK.send(&data).await { // 发送一字节的数据以保活
                 *KEEP_ALIVE_SWITCH.lock().await = false;
