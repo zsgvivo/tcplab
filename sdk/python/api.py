@@ -7,6 +7,7 @@
 from api_type import ConnectionIdentifier
 from __main__ import sdk_event
 
+
 # ConnectionIdentifier的定义在api_type.py中
 def app_connected(conn: ConnectionIdentifier):
     """

@@ -63,7 +63,7 @@ pub(crate) fn sdk_event(conn: &ConnectionIdentifier, bytes: &[u8], flags: u32) {
 fn unix_socket_send(event: Event) -> Result<()> {
     // 不能直接对event使用to_vec，否则字符串数组会被序列化成sequence<i32>。必须手动声明其为Binary的
     let mut bson_obj = bson::to_document(&event)?;
-    bson_obj.insert("bytes", bson::Binary{ subtype: BinarySubtype::Generic, bytes: Vec::from(event.bytes) });
+    bson_obj.insert("bytes", bson::Binary { subtype: BinarySubtype::Generic, bytes: Vec::from(event.bytes) });
     let data = bson::to_vec(&bson_obj)?;
     UNIX_SOCK.send(&data[..])?;
     Ok(())

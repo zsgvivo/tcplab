@@ -63,6 +63,7 @@ if __name__ == '__main__':
             else:
                 raise e
     import outgoing
+
     # 向服务器发送初次连接的通告
     sdk_event({"src": {"ip": "127.84.0.1", "port": 8484}, "dst": {"ip": "", "port": 0}}, b'network_exp4', 0xa0)
     print("已启动！")

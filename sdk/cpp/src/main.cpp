@@ -19,14 +19,14 @@ using json = nlohmann::json;
 
 int unix_sock = -1;
 
-bool unix_socket_send(json& event) {
+bool unix_socket_send(json &event) {
     auto data = json::to_bson(event);
     auto size = write(unix_sock, data.data(), data.size());
     if (size < 0) {
         perror("unix_sock send");
         return false;
     } else if (size < data.size()) {
-        std::cerr<<"WARNING: unix_sock write size < datagram.size()!"<<std::endl;
+        std::cerr << "WARNING: unix_sock write size < datagram.size()!" << std::endl;
         return false;
     }
     return true;
@@ -34,16 +34,16 @@ bool unix_socket_send(json& event) {
 
 void sdk_event(ConnectionIdentifier &conn, std::vector<uint8_t> &bytes, uint32_t flags) {
     json event = {
-            {"conn", {
-                {"src", {
-                        {"ip", conn.src.ip},
-                        {"port", conn.src.port}
-                }},
-                {"dst", {
-                        {"ip", conn.dst.ip},
-                        {"port", conn.dst.port}
-                }}
-            }},
+            {"conn",  {
+                              {"src", {
+                                              {"ip", conn.src.ip},
+                                              {"port", conn.src.port}
+                                      }},
+                              {"dst", {
+                                              {"ip", conn.dst.ip},
+                                              {"port", conn.dst.port}
+                                      }}
+                      }},
             {"flags", flags}
     };
     event["bytes"] = json::binary(bytes);
@@ -100,7 +100,8 @@ int main() {
     while (true) {
         if (connect(unix_sock, reinterpret_cast<const sockaddr *>(&peer_addr), sizeof(sockaddr_un))) {
             if (errno == 1) {
-                std::cout << "等待服务端UnixSocket资源释放(约500ms)...(若持续出现此信息，请检查自己是否开着另一个SDK进程)" << std::endl;
+                std::cout << "等待服务端UnixSocket资源释放(约500ms)...(若持续出现此信息，请检查自己是否开着另一个SDK进程)"
+                          << std::endl;
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 continue;
             } else {
