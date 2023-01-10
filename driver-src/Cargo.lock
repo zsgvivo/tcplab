@@ -328,7 +328,7 @@ dependencies = [
 
 [[package]]
 name = "network_exp4_driver"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "bson",
