@@ -274,8 +274,12 @@ async fn process_listener_inner(listener: &TcpListener, flags: u8) -> Result<()>
     let (socket, _) = listener.accept().await?;
     // 构造ConnectionIdentifier对象，然后把socket所有权转移到APP_SOCKS里面去
     let dst = IpAndPort { ip: socket.local_addr()?.ip().to_string(), port: socket.local_addr()?.port() };
-    let conn = ConnectionIdentifier { src: IpAndPort { ip: socket.peer_addr()?.ip().to_string(), port: get_available_pool_port(&dst).await? }, dst };
-    println!("捕获到新连接！从 本机:{} 到 {} 。(被捕获连接原始来源 {} )", conn.src.port, socket.local_addr()?, socket.peer_addr()?);
+    // 借鉴 https://stackoverflow.com/a/29500867 ：通过创建并connect一个UDP socket来确定所应使用的src IP
+    let test_source_sock = UdpSocket::bind("0.0.0.0:0").await?;
+    test_source_sock.connect(socket.local_addr()?).await?;
+    let src = IpAndPort { ip: test_source_sock.local_addr()?.ip().to_string(), port: get_available_pool_port(&dst).await? };
+    let conn = ConnectionIdentifier { src, dst };
+    println!("捕获到新连接！从 {}:{} 到 {} 。(被捕获连接原始来源 {} )", conn.src.ip, conn.src.port, socket.local_addr()?, socket.peer_addr()?);
     let fd = socket.as_raw_fd();
     let (reader, writer) = socket.into_split();
     {
