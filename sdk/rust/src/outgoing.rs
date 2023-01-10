@@ -2,7 +2,16 @@
 /// 你可以任意地改动此文件，改动的范围当然不限于已有的五个函数里。（只要已有函数的签名别改，要是签名改了main里面就调用不到了）
 /// 在开始写代码之前，请先仔细阅读此文件和api文件。这个文件里的五个函数是等你去完成的，而api里的函数是供你调用的。
 /// 提示：TCP是有状态的协议，因此你大概率，会需要一个什么样的数据结构来记录和维护所有连接的状态
-use crate::api::ConnectionIdentifier;
+use crate::api::{ConnectionIdentifier, app_connected};
+
+enum State{
+    SynRcvd,
+    Estab,
+    FinWait1,
+    FinWait2,
+    TimeWait,
+}
+
 
 /// 当有应用想要发起一个新的连接时，会调用此函数。想要连接的对象在conn里提供了。
 /// 你应该向想要连接的对象发送SYN报文，执行三次握手的逻辑。
@@ -10,6 +19,8 @@ use crate::api::ConnectionIdentifier;
 /// param: conn: 连接对象
 pub fn app_connect(conn: &ConnectionIdentifier) {
     // TODO 请实现此函数
+    
+    app_connected(conn);
     println!("app_connect, {:?}", conn);
 }
 
