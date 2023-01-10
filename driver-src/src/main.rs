@@ -17,6 +17,7 @@ use anyhow::Result;
 use bson::spec::BinarySubtype;
 use clap::{Parser, Subcommand};
 use lazy_static::lazy_static;
+use pnet_packet::ip::IpNextHeaderProtocols;
 use pnet_packet::Packet;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,7 @@ async fn process_raw_sock_inner(buf: &mut [u8]) -> Result<()> {
     let (size, addr) = RAW_SOCK.recv_from(buf).await?;
     if size >= buf.len() { return Err(anyhow!("WARNING: 收到了超过接收buffer大小({})的IP raw报文！该报文并未被完整接收！", buf.len())); }
     let ip_packet = pnet_packet::ipv4::Ipv4Packet::new(buf).ok_or(anyhow!("Received packet cannot be parsed as IPV4"))?;
+    if ip_packet.get_next_level_protocol() != IpNextHeaderProtocols::Tcp { return Ok(()); } // 不处理TCP以外的报文
     let tcp_packet: &[u8] = ip_packet.payload();
     let conn_res;
     {
