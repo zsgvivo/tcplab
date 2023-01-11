@@ -40,6 +40,6 @@ std::ostream &operator<<(std::ostream &out, ConnectionIdentifier &conn) {
     return out;
 }
 
-bool operator==(ConnectionIdentifier &a, ConnectionIdentifier &b) {
+bool operator==(const ConnectionIdentifier &a, const ConnectionIdentifier &b) {
     return a.src.ip == b.src.ip && a.src.port == b.src.port && a.dst.ip == b.dst.ip && a.dst.port == b.dst.port;
 }

@@ -27,7 +27,7 @@ struct ConnectionIdentifier {
     IpAndPort dst;
 };
 
-bool operator==(ConnectionIdentifier &a, ConnectionIdentifier &b);
+bool operator==(const ConnectionIdentifier &a, const ConnectionIdentifier &b);
 
 // 随便实现的，方便你调试
 std::ostream &operator<<(std::ostream &out, ConnectionIdentifier &conn);
