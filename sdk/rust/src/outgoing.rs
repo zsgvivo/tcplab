@@ -27,8 +27,13 @@ lazy_static! {
     // state: tcp 连接当前在 FSM 图中的位置
     // seq: 下一个发送的 tcp 报文序号数
     // ack: 发送的 ack 序号数
-    // acked: 已被确认的序号数
+    // acked: 未被确认的最小序号数
     static ref TCPSTATE:Mutex<HashMap<String, usize>> = Mutex::new(HashMap::new());
+    static ref CACHE:Mutex<HashMap<u32, Vec<u8>>> = Mutex::new(HashMap::new());
+    static ref CONNECTION:Mutex<ConnectionIdentifier> = Mutex::new(ConnectionIdentifier {
+        src: crate::api::IpAndPort { ip: String::from("0.0.0.0"), port: 0 },
+        dst: crate::api::IpAndPort { ip: String::from("0.0.0.0"), port: 0 },
+    });
 }
 
 /// 当有应用想要发起一个新的连接时，会调用此函数。想要连接的对象在conn里提供了。
@@ -47,14 +52,24 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
     let mut tcp_header_buf = &mut buf[..syn.header_len() as usize];
     syn.write(&mut tcp_header_buf).unwrap();
     tcp_tx(conn, &buf[..syn.header_len() as usize]);
-    // println!("tcp_header_buf: {:?}", &buf[..syn.header_len() as usize]);
-    // println!("tcp header:{:?}\n", syn);
 
-    // 更新 TCP 连接状态
+    // 初始化更新 TCP 连接状态
     let mut tcpstate = TCPSTATE.lock().unwrap();
     tcpstate.insert(String::from("state"), SYNSENT);
     tcpstate.insert(String::from("seq"), 1);
     tcpstate.insert(String::from("ack"), 0);
+
+    let mut connection = CONNECTION.lock().unwrap();
+    connection.src = conn.src.clone();
+    connection.dst = conn.dst.clone();
+
+
+    let mut vec = Vec::new();
+    for i in 0..syn.header_len() as usize {
+        vec.push(buf[i]);
+    }
+    let mut cache = CACHE.lock().unwrap();
+    cache.insert(syn.sequence_number, vec);
 
     // println!("app_connect, {:?}", conn);
 }
@@ -92,6 +107,13 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
             String::from("seq"),
             tcp_header.sequence_number as usize + payload.len(),
         );
+
+        let mut vec = Vec::new();
+        for i in 0..tcp_header_ends_at + payload.len() {
+            vec.push(buf[i]);
+        }
+        let mut cache = CACHE.lock().unwrap();
+        cache.insert(tcp_header.sequence_number, vec);
     }
 
     // println!("app_send, {:?}, {:?}", conn, std::str::from_utf8(bytes));
@@ -184,6 +206,8 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         tcpstate.insert(String::from("state"), ESTABLISHED);
         tcpstate.insert(String::from("ack"), ack.acknowledgment_number as usize);
         tcpstate.insert(String::from("seq"), ack.sequence_number as usize);
+        tcpstate.insert(String::from("acked"), tcp_header.acknowledgment_number as usize);
+
 
         // 调用app_connected函数，通知应用层连接已经被建立好了
         app_connected(conn);
@@ -196,6 +220,8 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
             String::from("acked"),
             tcp_header.acknowledgment_number as usize,
         );
+
+        // 如果是 FIN ACK, 更新状态
         if tcpstate.get("state").unwrap().clone() == FINWAIT1 {
             tcpstate.insert(String::from("state"), FINWAIT2);
         }
@@ -271,6 +297,30 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
 /// 它可以被用来在不开启多线程的情况下实现超时重传等功能，详见主仓库的README.md
 pub fn tick() {
     // TODO 可实现此函数，也可不实现
+    // 检查是否超时, 如超时, 重传报文
+    // 简化超时机制: 如果相邻两次 tick 调用期间(约 100ms) tcpstate.acked 未改变, 则判断序号为 acked 的包已丢失, 重传序号数在 acked~seq 之间的所有报文
+    let mut tcpstate = TCPSTATE.lock().unwrap();
+    // let acked = tcpstate.get("acked").unwrap().clone();
+    if let Some(&acked) = tcpstate.get("acked"){
+        if let Some(&lasttick_acked) = tcpstate.get("lasttick_acked"){
+            if acked == lasttick_acked && acked < tcpstate.get("seq").unwrap().clone() {
+                println!("acked {:?}超时, seq:{:?}", acked, tcpstate.get("seq").unwrap());
+                // 重传 acked 序号报文
+                let cache = CACHE.lock().unwrap();
+                if let Some(pkt) = cache.get(&(acked as u32)){
+                    // let pkt = cache.get(&(acked as u32)).unwrap();
+                    // transform vec<u8> into [u8]
+                    let mut buf = [0u8; 1500];
+                    for i in 0..pkt.len() {
+                        buf[i] = pkt[i];
+                    }
+                    let connection = CONNECTION.lock().unwrap();
+                    tcp_tx(&connection, &buf[..pkt.len()]);
+                }       
+            }
+        }
+        tcpstate.insert(String::from("lasttick_acked"), acked);
+    }
 }
 
 // 计算并设置 tcp header 的校验和
