@@ -2,7 +2,10 @@
 /// 你可以任意地改动此文件，改动的范围当然不限于已有的五个函数里。（只要已有函数的签名别改，要是签名改了main里面就调用不到了）
 /// 在开始写代码之前，请先仔细阅读此文件和api文件。这个文件里的五个函数是等你去完成的，而api里的函数是供你调用的。
 /// 提示：TCP是有状态的协议，因此你大概率，会需要一个什么样的数据结构来记录和维护所有连接的状态
-use crate::api::{app_connected, app_recv, tcp_tx, ConnectionIdentifier, app_peer_fin, release_connection, app_peer_rst};
+use crate::api::{
+    app_connected, app_peer_fin, app_peer_rst, app_recv, release_connection, tcp_tx,
+    ConnectionIdentifier,
+};
 use etherparse::{ip_number, Ipv4Header, TcpHeader, TcpHeaderSlice};
 use lazy_static::lazy_static;
 use pnet::packet::tcp::TcpFlags::FIN;
@@ -117,6 +120,7 @@ pub fn app_fin(conn: &ConnectionIdentifier) {
     tcp_tx(conn, &buf[..tcp_header_ends_at]);
     // 更新 tcp 连接状态
     tcp_state.insert(String::from("state"), FINWAIT1);
+
     // println!("app_fin, {:?}", conn);
 }
 
@@ -197,7 +201,7 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         }
     }
     // 如果收到对方发来的 FIN 报文
-    if tcp_header.fin == true{
+    if tcp_header.fin == true {
         // 调用 app_peer_fin 函数，通知应用层对端半关闭连接
         app_peer_fin(conn);
 
@@ -210,7 +214,7 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
             20000,
         );
         ack.ack = true;
-        ack.acknowledgment_number = tcp_header.sequence_number;
+        ack.acknowledgment_number = tcp_header.sequence_number + 1;
         set_checksum(&mut ack, conn, &[]);
 
         // 转化成字节流, 调用 tcp_tx 函数发送
@@ -227,10 +231,9 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         }
     }
     // 如果收到对方发来的 RST 报文
-    if tcp_header.rst == true{
+    if tcp_header.rst == true {
         // 通知应用层
         app_peer_rst(conn);
-        
     }
     // 如果有 payload 数据
     if payload.len() > 0 {
