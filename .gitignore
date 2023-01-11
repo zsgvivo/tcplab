@@ -2,3 +2,4 @@
 scratch*
 /**/target
 /**/cmake-*
+.DS_Store

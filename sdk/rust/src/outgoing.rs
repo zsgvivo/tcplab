@@ -2,7 +2,7 @@
 /// 你可以任意地改动此文件，改动的范围当然不限于已有的五个函数里。（只要已有函数的签名别改，要是签名改了main里面就调用不到了）
 /// 在开始写代码之前，请先仔细阅读此文件和api文件。这个文件里的五个函数是等你去完成的，而api里的函数是供你调用的。
 /// 提示：TCP是有状态的协议，因此你大概率，会需要一个什么样的数据结构来记录和维护所有连接的状态
-use crate::api::{ConnectionIdentifier, app_connected, tcp_tx};
+use crate::api::{ConnectionIdentifier, app_connected, tcp_tx, app_recv};
 use pnet::packet::tcp;
 use etherparse::{TcpHeader, TcpHeaderSlice, Ipv4Header, ip_number};
 use lazy_static::lazy_static;
@@ -19,8 +19,9 @@ const TIMEWAIT:usize = 5;
 lazy_static!{
     // 存储 TCP 连接状态的全局变量, 用 Mutex 保护
     // state: tcp 连接当前在 FSM 图中的位置
-    // seq: 下一个 tcp 报文序号数
-    // ack: ack 序号
+    // seq: 下一个发送的 tcp 报文序号数
+    // ack: 发送的 ack 序号数
+    // acked: 已被确认的序号数
     static ref TCPSTATE:Mutex<HashMap<String, usize>> = Mutex::new(HashMap::new());
 }
 
@@ -45,8 +46,8 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
     let mut tcp_header_buf = &mut buf[..syn.header_len() as usize];
     syn.write(&mut tcp_header_buf).unwrap();
     tcp_tx(conn, &buf[..syn.header_len() as usize]);
-    println!("tcp_header_buf: {:?}", &buf[..syn.header_len() as usize]);
-    println!("tcp header:{:?}\n", syn);
+    // println!("tcp_header_buf: {:?}", &buf[..syn.header_len() as usize]);
+    // println!("tcp header:{:?}\n", syn);
 
     // 更新 TCP 连接状态
     let mut tcpstate = TCPSTATE.lock().unwrap();
@@ -62,6 +63,7 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
 ///        bytes: 数据内容，是字节数组
 pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // TODO 请实现此函数
+    // 这里数据 bytes 的长度可能超过 MTU 需要进行分片, 否则会 panic
     let mut tcp_state = TCPSTATE.lock().unwrap();
     // 构造带 payload 的tcp 数据报
     let mut tcp_header = TcpHeader::new(
@@ -70,10 +72,20 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
         tcp_state.get("seq").unwrap().clone() as u32,
         1000,
     );
-    let mut buf = [0u8; 1500];
+    set_checksum(&mut tcp_header, conn, bytes);
 
+    let mut buf = [0u8; 1500];
+    let buf_len = buf.len();
+    let mut unwritten = &mut buf[..];
+    tcp_header.write(&mut unwritten).unwrap();
+    let tcp_header_ends_at = buf_len - unwritten.len();
+    buf[tcp_header_ends_at..tcp_header_ends_at + bytes.len()].copy_from_slice(bytes);
+    tcp_tx(conn, &buf[..tcp_header_ends_at + bytes.len()]);
+
+    // 更新 tcp 连接状态
+    tcp_state.insert(String::from("seq"), tcp_header.sequence_number as usize + bytes.len());
     
-    // println!("app_send, {:?}, {:?}", conn, std::str::from_utf8(bytes));
+    println!("app_send, {:?}, {:?}", conn, std::str::from_utf8(bytes));
 }
 
 /// 当应用层想要半关闭连接(FIN)时，会调用此函数。
@@ -97,7 +109,7 @@ pub fn app_rst(conn: &ConnectionIdentifier) {
 pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // TODO 请实现此函数
     // 处理收到的 tcp 报文
-    let tcp_header = TcpHeader::from_slice(bytes).unwrap().0;
+    let (tcp_header, tcp_payload )= TcpHeader::from_slice(bytes).unwrap();
     // println!("rx tcp_header: {:?}", tcp_header);
     // 如果收到 SYNACK 报文
     if tcp_header.syn == true && tcp_header.ack == true{
@@ -127,6 +139,39 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         // 调用app_connected函数，通知应用层连接已经被建立好了
         app_connected(conn);
     }
+    // 如果收到普通 ACK
+    else if tcp_header.ack == true {
+        // 更新 tcp 连接状态
+        let mut tcpstate = TCPSTATE.lock().unwrap();
+        tcpstate.insert(String::from("acked"), tcp_header.acknowledgment_number as usize);
+    }
+    // 如果有 payload 数据
+    if tcp_payload.len() > 0 {
+        // 调用 app_recv 函数，通知应用层收到了数据
+        app_recv(conn, tcp_payload);
+        // 回复 ACK 报文
+        let mut buf = [0u8; 1500];
+        let buf_len = buf.len();
+        let mut ack = TcpHeader::new(
+            conn.src.port,
+            conn.dst.port,
+            0,
+            1000,
+        );
+        ack.ack = true;
+        ack.acknowledgment_number = tcp_header.sequence_number + tcp_payload.len() as u32;
+        set_checksum(&mut ack, conn, &[]);
+        // ACK 转化成字节流, 调用 tcp_tx 函数发送
+        let mut unwritten = &mut buf[..];
+        ack.write(&mut unwritten).unwrap();
+        let tcp_header_ends_at = buf_len - unwritten.len();
+        tcp_tx(conn, &buf[..tcp_header_ends_at]);
+        // 更新 tcp 连接状态.
+        // todo: 实现累计确认机制
+        let mut tcpstate = TCPSTATE.lock().unwrap();
+        tcpstate.insert(String::from("ack"), ack.acknowledgment_number as usize);
+    }
+
     // println!("tcp_rx, {:?}, {:?}", conn, std::str::from_utf8(bytes));
 }
 
@@ -136,7 +181,7 @@ pub fn tick() {
     // TODO 可实现此函数，也可不实现
 }
 
-// 计算并设置 tcp 报文的校验和
+// 计算并设置 tcp header 的校验和
 pub fn set_checksum(tcp_header: &mut TcpHeader, conn: &ConnectionIdentifier, tcp_payload:&[u8]){
     let src_ipaddr:Ipv4Addr = conn.src.ip.parse().unwrap();
     let dst_ipaddr:Ipv4Addr = conn.dst.ip.parse().unwrap();
@@ -148,6 +193,7 @@ pub fn set_checksum(tcp_header: &mut TcpHeader, conn: &ConnectionIdentifier, tcp
     tcp_header.write(&mut unwritten).unwrap();
     let tcp_header_ends_at = buf_len - unwritten.len();
     buf[tcp_header_ends_at..tcp_header_ends_at + tcp_payload.len()].copy_from_slice(tcp_payload);
+    
     // tcp_header.checksum = tcp_header.calc_checksum_ipv4_raw(src_ipaddr.octets(), dst_ipaddr.octets(), &buf[..tcp_header_ends_at + tcp_payload.len()]).expect("failed to compute checksum");
     let tcp_packet  = tcp::TcpPacket::new(&buf[..tcp_header_ends_at + tcp_payload.len()]).unwrap();
     tcp_header.checksum = tcp::ipv4_checksum(&tcp_packet, &src_ipaddr, &dst_ipaddr);
