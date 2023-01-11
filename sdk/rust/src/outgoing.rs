@@ -5,7 +5,7 @@
 use crate::api::{app_connected, app_recv, tcp_tx, ConnectionIdentifier};
 use etherparse::{ip_number, Ipv4Header, TcpHeader, TcpHeaderSlice};
 use lazy_static::lazy_static;
-use pnet::packet::tcp;
+use pnet::packet::{tcp, Packet};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -113,7 +113,10 @@ pub fn app_rst(conn: &ConnectionIdentifier) {
 pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // TODO 请实现此函数
     // 处理收到的 tcp 报文
-    let (tcp_header, tcp_payload) = TcpHeader::from_slice(bytes).unwrap();
+    let (tcp_header, _) = TcpHeader::from_slice(bytes).unwrap();
+    let tcp_packet = tcp::TcpPacket::new(bytes).unwrap();
+    let payload = tcp_packet.payload();
+
     // println!("rx tcp_header: {:?}", tcp_header);
     // 如果收到 SYNACK 报文
     if tcp_header.syn == true && tcp_header.ack == true {
@@ -153,10 +156,10 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         );
     }
     // 如果有 payload 数据
-    else if tcp_payload.len() > 0 {
+    if payload.len() > 0 {
         let mut tcpstate = TCPSTATE.lock().unwrap();
         // 调用 app_recv 函数，通知应用层收到了数据
-        app_recv(conn, tcp_payload);
+        app_recv(conn, payload);
         // 回复 ACK 报文
         let mut buf = [0u8; 1500];
         let buf_len = buf.len();
@@ -167,7 +170,7 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
             20000,
         );
         ack.ack = true;
-        ack.acknowledgment_number = tcp_header.sequence_number + tcp_payload.len() as u32;
+        ack.acknowledgment_number = tcp_header.sequence_number + payload.len() as u32;
         set_checksum(&mut ack, conn, &[]);
         // ACK 转化成字节流, 调用 tcp_tx 函数发送
         let mut unwritten = &mut buf[..];
