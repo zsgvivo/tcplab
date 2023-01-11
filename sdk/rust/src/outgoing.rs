@@ -2,7 +2,7 @@
 /// 你可以任意地改动此文件，改动的范围当然不限于已有的五个函数里。（只要已有函数的签名别改，要是签名改了main里面就调用不到了）
 /// 在开始写代码之前，请先仔细阅读此文件和api文件。这个文件里的五个函数是等你去完成的，而api里的函数是供你调用的。
 /// 提示：TCP是有状态的协议，因此你大概率，会需要一个什么样的数据结构来记录和维护所有连接的状态
-use crate::api::{app_connected, app_recv, tcp_tx, ConnectionIdentifier, app_peer_fin};
+use crate::api::{app_connected, app_recv, tcp_tx, ConnectionIdentifier, app_peer_fin, release_connection, app_peer_rst};
 use etherparse::{ip_number, Ipv4Header, TcpHeader, TcpHeaderSlice};
 use lazy_static::lazy_static;
 use pnet::packet::tcp::TcpFlags::FIN;
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Mutex;
 
-const CLOSED: usize = 0;
+// const CLOSED: usize = 0;
 const SYNSENT: usize = 1;
 const ESTABLISHED: usize = 2;
 const FINWAIT1: usize = 3;
@@ -124,6 +124,23 @@ pub fn app_fin(conn: &ConnectionIdentifier) {
 /// param: conn: 连接对象
 pub fn app_rst(conn: &ConnectionIdentifier) {
     // TODO 请实现此函数
+    // 构造 TCP RST 报文
+    let tcp_state = TCPSTATE.lock().unwrap();
+    let mut rst = TcpHeader::new(
+        conn.src.port,
+        conn.dst.port,
+        tcp_state.get("seq").unwrap().clone() as u32,
+        20000,
+    );
+    rst.rst = true;
+    set_checksum(&mut rst, conn, &[]);
+    // 转化并发送报文字节流
+    let mut buf = [0u8; 1500];
+    let buf_len = buf.len();
+    let mut unwritten = &mut buf[..];
+    rst.write(&mut unwritten).unwrap();
+    let tcp_header_ends_at = buf_len - unwritten.len();
+    tcp_tx(conn, &buf[..tcp_header_ends_at]);
     // println!("app_rst, {:?}", conn);
 }
 
@@ -181,13 +198,9 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     }
     // 如果收到对方发来的 FIN 报文
     if tcp_header.fin == true{
-        // 更新 tcp 连接状态并通知应用层
-        let mut tcpstate = TCPSTATE.lock().unwrap();
-        if tcpstate.get("state").unwrap().clone() == FINWAIT2 {
-            tcpstate.insert(String::from("state"), TIMEWAIT);
-            // 调用 app_peer_fin 函数，通知应用层连接已经被关闭
-            app_peer_fin(conn);
-        }
+        // 调用 app_peer_fin 函数，通知应用层对端半关闭连接
+        app_peer_fin(conn);
+
         // 回复 ACK 报文
         let mut buf = [0u8; 1500];
         let mut ack = TcpHeader::new(
@@ -205,7 +218,19 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         ack.write(&mut tcp_header_buf).unwrap();
         tcp_tx(conn, &buf[..ack.header_len() as usize]);
 
-
+        // 更新 tcp 连接状态并通知应用层
+        let mut tcpstate = TCPSTATE.lock().unwrap();
+        if tcpstate.get("state").unwrap().clone() == FINWAIT2 {
+            tcpstate.insert(String::from("state"), TIMEWAIT);
+            // 完成四次挥手, 通知 driver 释放连接
+            release_connection(conn);
+        }
+    }
+    // 如果收到对方发来的 RST 报文
+    if tcp_header.rst == true{
+        // 通知应用层
+        app_peer_rst(conn);
+        
     }
     // 如果有 payload 数据
     if payload.len() > 0 {
