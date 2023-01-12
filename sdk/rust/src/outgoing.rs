@@ -6,13 +6,15 @@ use crate::api::{
     app_connected, app_peer_fin, app_peer_rst, app_recv, release_connection, tcp_tx,
     ConnectionIdentifier,
 };
-use etherparse::{ip_number, Ipv4Header, TcpHeader, TcpHeaderSlice};
+use etherparse::{TcpHeader};
 use lazy_static::lazy_static;
-use pnet::packet::{tcp, Packet};
+use pnet::packet::{tcp};
 use std::cmp::min;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::net::Ipv4Addr;
 use std::sync::Mutex;
+use std::time;
 
 #[derive(Clone, Copy)]
 enum FSMState {
@@ -24,14 +26,22 @@ enum FSMState {
     TIMEWAIT,
 }
 
+struct TCP_packet{
+    length: u32,
+    buf: [u8; 1500],
+}
+
 struct TCPState {
     state: FSMState,
     seq: u32,
     ack: u32,
     acked: u32,
+    send_times: HashMap<u32, time::Instant>,// 记录每条报文的发送时间
+    cache: HashMap<u32, TCP_packet>,// 缓存记录下每次发送过的报文段,以备超时重传
 }
 
-const WINDOW: u16 = 1500;// 暂未实现 tcp 缓存
+const MSS: usize = 1460; // TCP 报文最大长度, 取典型值1460
+const WINDOW: u16 = MSS as u16;// 暂未实现 tcp 缓存机制
 
 lazy_static! {
     // 存储 TCP 连接状态的全局变量, 用 Mutex 保护
@@ -40,6 +50,7 @@ lazy_static! {
     // ack: 发送的 ack 序号数
     // acked: 未被确认的最小序号数
     static ref TCPSTATES:Mutex<HashMap<String, TCPState>> = Mutex::new(HashMap::new());
+    static ref CONNECTIONS:Mutex<Vec<ConnectionIdentifier>> = Mutex::new(Vec::new());
 }
 
 /// 当有应用想要发起一个新的连接时，会调用此函数。想要连接的对象在conn里提供了。
@@ -65,9 +76,14 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
         seq: 1,
         ack: 0,
         acked: 0,
+        send_times: HashMap::new(),
+        cache: HashMap::new(),
     };
     let mut tcpstates = TCPSTATES.lock().unwrap();
     tcpstates.insert(ConnectionIdentifier2Str(&conn), tcp_state);
+    // 注册新 tcp 连接
+    let mut connections = CONNECTIONS.lock().unwrap();
+    connections.push(conn.clone())
 
     // println!("app_connect, {:?}", conn);
 }
@@ -77,8 +93,7 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
 ///        bytes: 数据内容，是字节数组
 pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // TODO 请实现此函数
-    // 这里应用层数据 bytes 的长度可能超过 MTU, 需要进行分片, 否则会 panic
-    const MSS: usize = 1460; // TCP 报文最大长度, 取典型值1460
+    // 这里应用层数据 bytes 的长度可能超过 MSS, 需要进行分片, 否则会 panic
     let n = bytes.len() / MSS + 1;
     for i in 0..n {
         let payload = &bytes[i * MSS..min((i + 1) * MSS, bytes.len())];
@@ -101,6 +116,8 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
 
         // 更新 tcp 连接状态
         tcp_state.seq += payload.len() as u32;
+        tcp_state.send_times.insert(tcp_header.sequence_number, time::Instant::now());
+        tcp_state.cache.insert(tcp_header.sequence_number, TCP_packet { length: (tcp_header_ends_at + payload.len()) as u32, buf: buf});
     }
 
     // println!("app_send, {:?}, {:?}", conn, std::str::from_utf8(bytes));
@@ -272,7 +289,25 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
 /// 它可以被用来在不开启多线程的情况下实现超时重传等功能，详见主仓库的README.md
 pub fn tick() {
     // TODO 可实现此函数，也可不实现
-    // 检查是否超时, 如超时, 重传报文
+    // 检查每个 tcp 连接的 acked 序号报文段是否超时, 如超时, 重传相应报文
+    // 暂时设定超时上限 1s, todo: 上限1,5 estRTT
+    let mut tcpstates = TCPSTATES.lock().unwrap();
+    let connections = CONNECTIONS.lock().unwrap();
+    for i in 0..connections.len(){
+        let conn = &connections[i];
+        let mut tcp_state = tcpstates.get_mut(&ConnectionIdentifier2Str(&conn)).unwrap();
+        // if let Some(acked) = tcp_state.acked
+        if let Some(&acked_send_time)= tcp_state.send_times.get(&tcp_state.acked){
+            println!("超时重传!{:?}", time::Instant::now());
+            let time_now = time::Instant::now();
+            if time_now - time::Duration::from_millis(1000) > acked_send_time {
+                // acked 序号报文超超时
+                let pkt = tcp_state.cache.get(&tcp_state.acked).unwrap();
+                tcp_tx(conn, &pkt.buf[..pkt.length as usize]);
+            }
+            tcp_state.send_times.insert(tcp_state.acked, time::Instant::now());
+        }
+    }
 }
 
 // 计算并设置 tcp header 的校验和
@@ -286,13 +321,13 @@ pub fn set_checksum(tcp_header: &mut TcpHeader, conn: &ConnectionIdentifier, tcp
     tcp_header.write(&mut unwritten).unwrap();
     let tcp_header_ends_at = buf_len - unwritten.len();
     buf[tcp_header_ends_at..tcp_header_ends_at + tcp_payload.len()].copy_from_slice(tcp_payload);
-    // tcp_header.checksum = tcp_header.calc_checksum_ipv4_raw(src_ipaddr.octets(), dst_ipaddr.octets(), &buf[..tcp_header_ends_at + tcp_payload.len()]).expect("failed to compute checksum");
     let tcp_packet = tcp::TcpPacket::new(&buf[..tcp_header_ends_at + tcp_payload.len()]).unwrap();
+    // 设置 checksum
     tcp_header.checksum = tcp::ipv4_checksum(&tcp_packet, &src_ipaddr, &dst_ipaddr);
 }
 
 pub fn ConnectionIdentifier2Str(conn: &ConnectionIdentifier) -> String {
-    // 把 ConnectionIdentifie 转换成字符串以便哈希, 格式: 0.0.0.0:0->1.1.1.1:1
+    // 把 ConnectionIdentifier 转换成 String 以便哈希, 格式: 0.0.0.0:0->1.1.1.1:1
     let src_ipaddr: Ipv4Addr = conn.src.ip.parse().unwrap();
     let dst_ipaddr: Ipv4Addr = conn.dst.ip.parse().unwrap();
     let src_port = conn.src.port;
