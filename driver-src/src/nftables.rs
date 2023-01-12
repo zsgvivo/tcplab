@@ -2,7 +2,7 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 pub struct NftGuard {}
 
@@ -70,7 +70,6 @@ pub fn clear_all() {
 fn print_one(command_str: &str) -> Result<()> {
     println!("$ {}", command_str);
     let output = get_command(command_str).output()?;
-    if !output.status.success() { return Err(anyhow!("")); };
     println!("{}", std::str::from_utf8(&output.stdout)?);
     Ok(())
 }
