@@ -8,7 +8,7 @@ use std::fs::remove_file;
 use std::io::Error;
 use std::mem::size_of;
 use std::net::{IpAddr, SocketAddr};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::str::FromStr;
 
@@ -80,18 +80,8 @@ lazy_static! {
     static ref RX_OFFLOADING: bool = true; // TODO: 现在默认RX_OFFLOADING总是开启的，因此总会为收到的包重算检验和（即假定能被网卡发过来的包都是检验和正确的）。更合适的方法应该是通过ethtool --show-offload读取当前网卡的rx_checksumming状态，以此为依据设置这里的值。
 }
 
-fn get_connection_identifier(app_socks: &AppSocksType, dst_addr: &SocketAddr, src_port: u16, dst_port: u16) -> Option<ConnectionIdentifier> {
-    let dst_ip = dst_addr.ip().to_string();
-    for (k, _) in app_socks {
-        if k.src.port == src_port && k.dst.port == dst_port && k.dst.ip == dst_ip {
-            return Some(k.clone());
-        }
-    }
-    None
-}
-
 async fn process_raw_sock_inner(buf: &mut [u8]) -> Result<()> {
-    let (size, addr) = RAW_SOCK.recv_from(buf).await?;
+    let (size, _) = RAW_SOCK.recv_from(buf).await?;
     if size >= buf.len() { return Err(anyhow!("WARNING: 收到了超过接收buffer大小({})的IP raw报文！该报文并未被完整接收！", buf.len())); }
     let ip_packet = pnet_packet::ipv4::Ipv4Packet::new(buf).ok_or(anyhow!("Received packet cannot be parsed as IPV4"))?;
     if ip_packet.get_next_level_protocol() != IpNextHeaderProtocols::Tcp { return Ok(()); } // 不处理TCP以外的报文
@@ -99,11 +89,9 @@ async fn process_raw_sock_inner(buf: &mut [u8]) -> Result<()> {
     if *RX_OFFLOADING { // 如果网卡开了TCP Offloading，则重算检验和以确保下层收到的包的检验和正确
         tcp_packet.set_checksum(ipv4_checksum(&tcp_packet.to_immutable(), &ip_packet.get_source(), &ip_packet.get_destination()));
     }
-    let conn_res;
-    {
-        conn_res = get_connection_identifier(APP_SOCKS.lock().await.deref(), &addr, tcp_packet.get_destination(), tcp_packet.get_source());
-    }
-    if let Some(conn) = conn_res {
+    let conn = ConnectionIdentifier { src: IpAndPort { ip: ip_packet.get_destination().to_string(), port: tcp_packet.get_destination() }, dst: IpAndPort { ip: ip_packet.get_source().to_string(), port: tcp_packet.get_source() } };
+    // 如果记录中有此连接对象（即这个连接是已被捕捉的连接），则将TCP报文发给SDK
+    if let Some(_) = APP_SOCKS.lock().await.get(&conn) {
         driver_event(&conn, tcp_packet.packet(), 0x40).await;
     }
     Ok(())
