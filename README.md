@@ -20,7 +20,7 @@ TCP协议实现 软件套件
   - 如果你不需要自行编译server，也可以不安装
 
 ## 项目结构
-> 如果你是《计算机网络及应用》的同学：你不应该进行driver-src的构建步骤，而是直接使用套件中自带的./driver可执行文件。
+> 如果你是《计算机网络及应用》的同学：你不应该进行driver-src的构建步骤，而是直接使用套件中自带的./driver可执行文件。除非你存在例如，使用ARM架构的机器且无法安装amd64的虚拟机，或使用较低版本的操作系统(如Ubuntu20.04)、系统中的lib版本过低等情况，你才需要自己编译driver。
 - driver-src: driver部分的源代码。
   - 构建方法：`cd driver-src && sh build-driver.sh`
 - driver：使用`driver-src`中的`build-driver.sh`脚本编译得到的可执行文件。
