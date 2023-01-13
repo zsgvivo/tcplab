@@ -108,7 +108,7 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
 
         // 构造带 payload 的tcp 数据报
         let mut tcp_header = TcpHeader::new(conn.src.port, conn.dst.port, tcp_state.seq, WINDOW);
-        // tcp_header.ack = true;
+        tcp_header.ack = true;
         tcp_header.acknowledgment_number = tcp_state.ack;
         set_checksum(&mut tcp_header, conn, payload);
 
