@@ -8,6 +8,7 @@ import os
 import sys
 import time
 from socket import socket, SOCK_DGRAM, AF_UNIX
+from traceback import print_exc
 
 import bson
 
@@ -40,17 +41,20 @@ def unix_socket_recv():
             f"WARNING: 收到了超过接收buffer大小({max_size})的unix domain socket报文！该报文并未被完整接收！")
     event = bson.loads(data)
     flags = event["flags"]
-    if flags == 0x0:
-        outgoing.app_send(event["conn"], event["bytes"])
-    elif flags == 0x1:
-        outgoing.app_fin(event["conn"])
-    elif flags == 0x2:
-        outgoing.app_connect(event["conn"])
-    elif flags == 0x4:
-        outgoing.app_rst(event["conn"])
-    elif flags == 0x40:
-        outgoing.tcp_rx(event["conn"], event["bytes"])
-
+    try:
+        if flags == 0x0:
+            outgoing.app_send(event["conn"], event["bytes"])
+        elif flags == 0x1:
+            outgoing.app_fin(event["conn"])
+        elif flags == 0x2:
+            outgoing.app_connect(event["conn"])
+        elif flags == 0x4:
+            outgoing.app_rst(event["conn"])
+        elif flags == 0x40:
+            outgoing.tcp_rx(event["conn"], event["bytes"])
+    except Exception:
+        print("调用outgoing函数时发生异常！以下是异常栈：")
+        print_exc()
 
 if __name__ == '__main__':
     try:
