@@ -3,3 +3,5 @@ scratch*
 /**/target
 /**/cmake-*
 .DS_Store
+__pycache__/*
+*.ipynb
