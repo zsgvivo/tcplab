@@ -175,7 +175,11 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // 处理收到的 tcp 报文
     let (tcp_header, payload) = TcpHeader::from_slice(bytes).unwrap();
     let mut tcpstates = TCPSTATES.lock().unwrap();
-    let tcp_state = tcpstates.get_mut(&ConnectionIdentifier2Str(&conn)).unwrap();
+    let temp = tcpstates.get_mut(&ConnectionIdentifier2Str(&conn));
+    if let None = temp{
+        return; // 收到未注册tcp连接的消息
+    }
+    let tcp_state = temp.unwrap();
     // 如果收到 SYNACK 报文
     if tcp_header.syn == true && tcp_header.ack == true {
         // 构造 ACK 报文头
