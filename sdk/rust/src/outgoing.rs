@@ -41,7 +41,7 @@ struct TCPState {
     // DevRTT: RTT 偏差估计值
     // send_time: 每条报文的发送时间, key 为报文序列号
     // send_times2: 每条报文发送时间, key 为报文预期的 ack 号, 这是为了方便计算 estRTT
-    // cache: 缓存发送过的报文以备超时重传
+    // send_cache: 缓存发送过的报文以备超时重传
     state: FSMState,
     seq: u32,
     ack: u32,
@@ -51,14 +51,14 @@ struct TCPState {
     DevRTT: time::Duration,
     send_times: HashMap<u32, time::Instant>,
     send_times2: HashMap<u32, time::Instant>,
-    cache: HashMap<u32, TCP_packet>,
+    send_cache: HashMap<u32, TCP_packet>,
 }
 
 const MSS: usize = 1460; // TCP 报文最大长度, 取典型值1460
 const WINDOW: u16 = MSS as u16; // 暂未实现 tcp 缓存机制, 流量控制
 
 lazy_static! {
-    // 存储所有在线 TCP 连接的状态
+    // 存储所有在线 TCP 连接状态, key 为 &ConnectionIdentifier2Str(&conn)
     static ref TCPSTATES:Mutex<HashMap<String, TCPState>> = Mutex::new(HashMap::new());
     // 存储所有在线的 TCP 连接四元组
     static ref CONNECTIONS:Mutex<Vec<ConnectionIdentifier>> = Mutex::new(Vec::new());
@@ -87,7 +87,7 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
         DevRTT: time::Duration::from_millis(0),
         send_times: HashMap::new(),
         send_times2: HashMap::new(),
-        cache: HashMap::new(),
+        send_cache: HashMap::new(),
     };
     let mut tcpstates = TCPSTATES.lock().unwrap();
     tcpstates.insert(ConnectionIdentifier2Str(&conn), tcp_state);
@@ -123,7 +123,7 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
             tcp_header.sequence_number + payload.len() as u32,
             time::Instant::now(),
         );
-        tcp_state.cache.insert(
+        tcp_state.send_cache.insert(
             tcp_header.sequence_number,
             TCP_packet {
                 length: (tcp_header.header_len() as u32 + payload.len() as u32),
@@ -223,7 +223,7 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         tcp_state.acked = tcp_header.acknowledgment_number;
         // 若收到的 ack 已经重复 3 次,重传一次报文.
         if tcp_state.dup_acks == 3 {
-            if let Some(pkt) = tcp_state.cache.get(&tcp_state.acked) {
+            if let Some(pkt) = tcp_state.send_cache.get(&tcp_state.acked) {
                 tcp_tx(conn, &pkt.buf[..pkt.length as usize]);
             }
         }
@@ -301,7 +301,7 @@ pub fn tick() {
                 let time_now = time::Instant::now();
                 if time_now - (tcp_state.EstRTT + tcp_state.DevRTT.mul(4)) > acked_send_time {
                     // acked 序号报文超时, 重传报文
-                    let pkt = tcp_state.cache.get(&tcp_state.acked).unwrap();
+                    let pkt = tcp_state.send_cache.get(&tcp_state.acked).unwrap();
                     tcp_tx(conn, &pkt.buf[..pkt.length as usize]);
                     // 更新该报文的发送时间
                     tcp_state
