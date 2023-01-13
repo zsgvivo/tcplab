@@ -157,7 +157,11 @@ pub fn app_rst(conn: &ConnectionIdentifier) {
     // TODO 请实现此函数
     // 构造 TCP RST 报文
     let mut tcpstates = TCPSTATES.lock().unwrap();
-    let tcp_state = tcpstates.get_mut(&ConnectionIdentifier2Str(&conn)).unwrap();
+    let temp = tcpstates.get_mut(&ConnectionIdentifier2Str(&conn));
+    if let None = temp{
+        return; // 连接已经关闭
+    }
+    let tcp_state = temp.unwrap();
     let mut rst = TcpHeader::new(conn.src.port, conn.dst.port, tcp_state.seq, WINDOW);
     rst.rst = true;
     set_checksum(&mut rst, conn, &[]);
