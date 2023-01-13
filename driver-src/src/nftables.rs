@@ -1,6 +1,6 @@
 /// 这是driver部分的源代码。不得改动！
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 use anyhow::Result;
 
@@ -10,11 +10,11 @@ impl NftGuard {
     pub fn new(all: bool) -> NftGuard {
         // 如果没添加ip规则，就添加
         if get_command("ip rule list fwmark 84").output().unwrap().stdout.len() == 0 {
-            get_command("ip rule add fwmark 84 lookup 84").output().unwrap();
+            run_command("ip rule add fwmark 84 lookup 84");
             println!("已配置ip rule规则")
         }
         if get_command("ip route list table 84").output().unwrap().stdout.len() == 0 {
-            get_command("ip route add 0.0.0.0/0 dev lo table 84").output().unwrap();
+            run_command("ip route add 0.0.0.0/0 dev lo table 84");
             println!("已配置ip route规则")
         }
         let nft_conf = include_str!("nftables.conf");
@@ -24,6 +24,7 @@ impl NftGuard {
 
         let mut child = get_command("nft -f -").stdin(Stdio::piped()).spawn().unwrap();
         child.stdin.as_mut().unwrap().write_all(patched_conf.as_bytes()).unwrap();
+        if !child.wait().unwrap().success() { panic!("配置nft规则失败！") }
         println!("已配置nftables规则，类型为{}({})", name, match_cidr);
         NftGuard {}
     }
@@ -43,6 +44,12 @@ fn get_command(command: &str) -> Command {
         command.arg(components[i]);
     }
     command
+}
+
+fn run_command(command: &str) -> Output {
+    let output = get_command(command).output().unwrap();
+    if !output.status.success() { panic!("执行命令{}失败！", command) }
+    output
 }
 
 fn clear_nft() {
