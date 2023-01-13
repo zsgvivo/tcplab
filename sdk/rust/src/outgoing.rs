@@ -71,9 +71,7 @@ pub fn app_connect(conn: &ConnectionIdentifier) {
     set_checksum(&mut syn, conn, &[]);
 
     // 转化并发送报文字节流
-    let mut tcp_header_buf = &mut buf[..syn.header_len() as usize];
-    syn.write(&mut tcp_header_buf).unwrap();
-    tcp_tx(conn, &buf[..syn.header_len() as usize]);
+    send_tcp_pkt(conn, &syn, &[]);
 
     // 初始化更新 TCP 连接状态
     let tcp_state = TCPState {
@@ -111,14 +109,7 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
         tcp_header.ack = true;
         tcp_header.acknowledgment_number = tcp_state.ack;
         set_checksum(&mut tcp_header, conn, payload);
-
-        let mut buf = [0u8; 1500];
-        let buf_len = buf.len();
-        let mut unwritten = &mut buf[..];
-        tcp_header.write(&mut unwritten).unwrap();
-        let tcp_header_ends_at = buf_len - unwritten.len();
-        buf[tcp_header_ends_at..tcp_header_ends_at + payload.len()].copy_from_slice(payload);
-        tcp_tx(conn, &buf[..tcp_header_ends_at + payload.len()]);
+        let buf = send_tcp_pkt(conn, &tcp_header, payload);
 
         // 更新 tcp 连接状态
         tcp_state.seq += payload.len() as u32;
@@ -128,7 +119,7 @@ pub fn app_send(conn: &ConnectionIdentifier, bytes: &[u8]) {
         tcp_state.cache.insert(
             tcp_header.sequence_number,
             TCP_packet {
-                length: (tcp_header_ends_at + payload.len()) as u32,
+                length: (tcp_header.header_len() as u32 + payload.len() as u32) ,
                 buf: buf,
             },
         );
@@ -148,12 +139,9 @@ pub fn app_fin(conn: &ConnectionIdentifier) {
     fin.fin = true;
     set_checksum(&mut fin, conn, &[]);
     // 转化并发送报文字节流
-    let mut buf = [0u8; 1500];
-    let buf_len = buf.len();
-    let mut unwritten = &mut buf[..];
-    fin.write(&mut unwritten).unwrap();
-    let tcp_header_ends_at = buf_len - unwritten.len();
-    tcp_tx(conn, &buf[..tcp_header_ends_at]);
+    send_tcp_pkt(conn, &fin, &[]);
+
+
     // 更新 tcp 连接状态
     tcp_state.state = FSMState::FINWAIT1;
 
@@ -171,12 +159,7 @@ pub fn app_rst(conn: &ConnectionIdentifier) {
     rst.rst = true;
     set_checksum(&mut rst, conn, &[]);
     // 转化并发送报文字节流
-    let mut buf = [0u8; 1500];
-    let buf_len = buf.len();
-    let mut unwritten = &mut buf[..];
-    rst.write(&mut unwritten).unwrap();
-    let tcp_header_ends_at = buf_len - unwritten.len();
-    tcp_tx(conn, &buf[..tcp_header_ends_at]);
+    send_tcp_pkt(conn, &rst, &[]);
 
     // println!("app_rst, {:?}", conn);
 }
@@ -194,7 +177,6 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
     // 如果收到 SYNACK 报文
     if tcp_header.syn == true && tcp_header.ack == true {
         // 构造 ACK 报文头
-        let mut buf = [0u8; 1500];
         let mut ack = TcpHeader::new(
             conn.src.port,
             conn.dst.port,
@@ -206,9 +188,7 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         set_checksum(&mut ack, conn, &[]);
 
         // 转化成字节流, 调用 tcp_tx 函数发送
-        let mut tcp_header_buf = &mut buf[..ack.header_len() as usize];
-        ack.write(&mut tcp_header_buf).unwrap();
-        tcp_tx(conn, &buf[..ack.header_len() as usize]);
+        send_tcp_pkt(conn, &ack, &[]);
 
         // 更新 tcp 连接状态
         tcp_state.state = FSMState::ESTABLISHED;
@@ -237,6 +217,9 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         if tcp_state.dup_acks == 3{
             if let Some(pkt) = tcp_state.cache.get(&tcp_state.acked){
                 tcp_tx(conn, &pkt.buf[..pkt.length as usize]);
+                // let (mut h, mut p) = TcpHeader::from_slice(&pkt.buf[..pkt.length as usize]).unwrap();
+                // h.acknowledgment_number = 
+                
             }
         }
 
@@ -251,7 +234,6 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
         if tcp_header.sequence_number == tcp_state.ack {
             // 调用 app_peer_fin 函数，通知应用层对端半关闭连接
             app_peer_fin(conn);
-            let mut buf = [0u8; 1500];
             let mut ack = TcpHeader::new(
                 conn.src.port,
                 conn.dst.port,
@@ -263,9 +245,7 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
             set_checksum(&mut ack, conn, &[]);
 
             // 转化成字节流, 调用 tcp_tx 函数发送
-            let mut tcp_header_buf = &mut buf[..ack.header_len() as usize];
-            ack.write(&mut tcp_header_buf).unwrap();
-            tcp_tx(conn, &buf[..ack.header_len() as usize]);
+            send_tcp_pkt(conn, &ack, &[]);
 
             // 更新 tcp 连接状态并通知应用层
             if let FSMState::FINWAIT2 = tcp_state.state {
@@ -294,17 +274,13 @@ pub fn tcp_rx(conn: &ConnectionIdentifier, bytes: &[u8]) {
             tcp_state.ack = tcp_header.sequence_number + payload.len() as u32;
         }
         // 回复 ACK 报文
-        let mut buf = [0u8; 1500];
-        let buf_len = buf.len();
+
         let mut ack = TcpHeader::new(conn.src.port, conn.dst.port, tcp_state.seq, WINDOW);
         ack.ack = true;
         ack.acknowledgment_number = tcp_state.ack;
         set_checksum(&mut ack, conn, &[]);
         // ACK 转化成字节流, 调用 tcp_tx 函数发送
-        let mut unwritten = &mut buf[..];
-        ack.write(&mut unwritten).unwrap();
-        let tcp_header_ends_at = buf_len - unwritten.len();
-        tcp_tx(conn, &buf[..tcp_header_ends_at]);
+        send_tcp_pkt(conn, &ack, &[]);
     }
     // println!("tcp_rx, {:?}, {:?}", conn, std::str::from_utf8(bytes));
 }
@@ -366,4 +342,15 @@ pub fn ConnectionIdentifier2Str(conn: &ConnectionIdentifier) -> String {
     let dst = format!("{}:{}", dst_ip, dst_port);
     let conn_str = format!("{}->{}", src, dst);
     conn_str
+}
+
+pub fn send_tcp_pkt(conn: &ConnectionIdentifier, header: &TcpHeader, payload: &[u8]) -> [u8; 1500]{
+    let mut buf = [0u8; 1500];
+    let buf_len = buf.len();
+    let mut unwritten = &mut buf[..];
+    header.write(&mut unwritten).unwrap();
+    let tcp_header_ends_at = buf_len - unwritten.len();
+    buf[tcp_header_ends_at..tcp_header_ends_at + payload.len()].copy_from_slice(payload);
+    tcp_tx(conn, &buf[..tcp_header_ends_at + payload.len()]);
+    buf
 }
