@@ -6,9 +6,8 @@ use crate::api::{
     app_connected, app_peer_fin, app_peer_rst, app_recv, release_connection, tcp_tx,
     ConnectionIdentifier,
 };
-use etherparse::TcpHeader;
+use etherparse::{TcpHeader, Ipv4Header, ip_number};
 use lazy_static::lazy_static;
-use pnet::packet::tcp;
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
@@ -329,16 +328,18 @@ pub fn tick() {
 pub fn set_checksum(tcp_header: &mut TcpHeader, conn: &ConnectionIdentifier, tcp_payload: &[u8]) {
     let src_ipaddr: Ipv4Addr = conn.src.ip.parse().unwrap();
     let dst_ipaddr: Ipv4Addr = conn.dst.ip.parse().unwrap();
-    // 将 tcp header 和 tcp payload 转化为 ipv4 payload 以计算 checksum
-    let mut buf = [0u8; 1500];
-    let buf_len = buf.len();
-    let mut unwritten = &mut buf[..];
-    tcp_header.write(&mut unwritten).unwrap();
-    let tcp_header_ends_at = buf_len - unwritten.len();
-    buf[tcp_header_ends_at..tcp_header_ends_at + tcp_payload.len()].copy_from_slice(tcp_payload);
-    let tcp_packet = tcp::TcpPacket::new(&buf[..tcp_header_ends_at + tcp_payload.len()]).unwrap();
+    // 构造 ipv4 header 以计算 checksum
+    let ip_header = Ipv4Header::new(
+        tcp_header.header_len() + tcp_payload.len() as u16,
+        64,
+        ip_number::TCP,
+        src_ipaddr.octets(),
+        dst_ipaddr.octets(),
+    );
     // 设置 checksum
-    tcp_header.checksum = tcp::ipv4_checksum(&tcp_packet, &src_ipaddr, &dst_ipaddr);
+    tcp_header.checksum = tcp_header
+    .calc_checksum_ipv4(&ip_header, &tcp_payload)
+    .expect("etherparse failed to compute checksum");
 }
 
 pub fn ConnectionIdentifier2Str(conn: &ConnectionIdentifier) -> String {
